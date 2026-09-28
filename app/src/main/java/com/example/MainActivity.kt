@@ -16,9 +16,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.QueueMusic
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Settings
@@ -42,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.ui.MainViewModel
 import com.example.ui.screens.AiEnhancementScreen
+import com.example.ui.screens.DialogueScreen
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SynthesisScreen
@@ -58,6 +61,12 @@ enum class AppDestination(
         selectedIcon = Icons.Filled.RecordVoiceOver,
         unselectedIcon = Icons.Outlined.RecordVoiceOver,
         testTag = "nav_synthesis"
+    ),
+    DIALOGUES(
+        title = "Dialogues",
+        selectedIcon = Icons.Filled.Forum,
+        unselectedIcon = Icons.Outlined.Forum,
+        testTag = "nav_dialogues"
     ),
     AI_ENHANCEMENT(
         title = "Amélioration IA",
@@ -159,6 +168,21 @@ fun MainAppScaffold(viewModel: MainViewModel) {
             when (destination) {
                 AppDestination.SYNTHESIS -> {
                     SynthesisScreen(
+                        viewModel = viewModel,
+                        onNavigateToAiEnhancement = { audioId ->
+                            selectedAudioIdForEnhancement = audioId
+                            currentDestination = AppDestination.AI_ENHANCEMENT
+                        },
+                        onNavigateToDialogues = {
+                            currentDestination = AppDestination.DIALOGUES
+                        },
+                        onNavigateToSettings = {
+                            currentDestination = AppDestination.SETTINGS
+                        }
+                    )
+                }
+                AppDestination.DIALOGUES -> {
+                    DialogueScreen(
                         viewModel = viewModel,
                         onNavigateToAiEnhancement = { audioId ->
                             selectedAudioIdForEnhancement = audioId

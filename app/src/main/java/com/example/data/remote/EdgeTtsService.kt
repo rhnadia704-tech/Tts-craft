@@ -47,6 +47,14 @@ class EdgeTtsService(private val context: Context) {
         val isFallback: Boolean = false
     )
 
+    data class DialogueTurnData(
+        val voiceId: String,
+        val text: String,
+        val speed: Float = 1.0f,
+        val pitch: Float = 0.0f,
+        val pauseAfterMs: Int = 300
+    )
+
     suspend fun synthesize(
         text: String,
         voice: Voice,
@@ -55,20 +63,11 @@ class EdgeTtsService(private val context: Context) {
         volumeFactor: Float = 1.0f,
         customSsmlContent: String? = null
     ): Result<SynthesisResult> = withContext(Dispatchers.IO) {
-        val audioDir = File(context.filesDir, "audio_outputs").apply { mkdirs() }
-        val outputFile = File(audioDir, "edge_tts_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.mp3")
-
-        val completionDeferred = CompletableDeferred<Boolean>()
-        val audioBuffer = ByteArrayOutputStream()
-
         val ratePercent = ((rateFactor - 1.0f) * 100).toInt()
         val rateStr = if (ratePercent >= 0) "+$ratePercent%" else "$ratePercent%"
         val pitchStr = if (pitchHz.toInt() >= 0) "+${pitchHz.toInt()}Hz" else "${pitchHz.toInt()}Hz"
         val volumePercent = (volumeFactor * 100).toInt().coerceIn(0, 100)
         val volumeStr = "$volumePercent%"
-
-        val requestId = UUID.randomUUID().toString().replace("-", "")
-        val connectionId = UUID.randomUUID().toString().replace("-", "")
 
         val escapedText = text.replace("&", "&amp;")
             .replace("<", "&lt;")
@@ -88,6 +87,54 @@ class EdgeTtsService(private val context: Context) {
             </speak>
         """.trimIndent()
 
+        synthesizeSsml(ssml)
+    }
+
+    suspend fun synthesizeDialogue(
+        turns: List<DialogueTurnData>,
+        defaultLocale: String = "fr-FR"
+    ): Result<SynthesisResult> = withContext(Dispatchers.IO) {
+        val turnsSsml = StringBuilder()
+        turns.forEach { turn ->
+            val escapedText = turn.text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;")
+
+            val ratePercent = ((turn.speed - 1.0f) * 100).toInt()
+            val rateStr = if (ratePercent >= 0) "+$ratePercent%" else "$ratePercent%"
+            val pitchStr = if (turn.pitch.toInt() >= 0) "+${turn.pitch.toInt()}Hz" else "${turn.pitch.toInt()}Hz"
+
+            turnsSsml.append("""
+                <voice name='${turn.voiceId}'>
+                    <prosody pitch='$pitchStr' rate='$rateStr'>
+                        $escapedText
+                    </prosody>
+                </voice>
+                <break time='${turn.pauseAfterMs}ms'/>
+            """.trimIndent()).append("\n")
+        }
+
+        val ssml = """
+            <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='$defaultLocale'>
+                $turnsSsml
+            </speak>
+        """.trimIndent()
+
+        synthesizeSsml(ssml)
+    }
+
+    private suspend fun synthesizeSsml(ssml: String): Result<SynthesisResult> = withContext(Dispatchers.IO) {
+        val audioDir = File(context.filesDir, "audio_outputs").apply { mkdirs() }
+        val outputFile = File(audioDir, "edge_tts_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.mp3")
+
+        val completionDeferred = CompletableDeferred<Boolean>()
+        val audioBuffer = ByteArrayOutputStream()
+
+        val requestId = UUID.randomUUID().toString().replace("-", "")
+        val connectionId = UUID.randomUUID().toString().replace("-", "")
+
         val requestUrl = "$WSS_URL&ConnectionId=$connectionId"
         val request = Request.Builder()
             .url(requestUrl)
@@ -98,12 +145,9 @@ class EdgeTtsService(private val context: Context) {
             .addHeader("Accept-Language", "en-US,en;q=0.9")
             .build()
 
-        var currentWs: WebSocket? = null
-
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 super.onOpen(webSocket, response)
-                currentWs = webSocket
                 try {
                     val dateStr = getCurrentUtcDate()
                     // 1. Send speech config
@@ -168,7 +212,7 @@ class EdgeTtsService(private val context: Context) {
         }
 
         val ws = client.newWebSocket(request, listener)
-        val success = withTimeoutOrNull(25_000) {
+        val success = withTimeoutOrNull(30_000) {
             completionDeferred.await()
         } ?: false
 

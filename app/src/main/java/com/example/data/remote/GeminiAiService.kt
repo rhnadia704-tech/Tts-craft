@@ -222,4 +222,118 @@ class GeminiAiService {
             explanation = "Optimisation prosodique appliquée avec succès : rythme naturel et inflexions expressives."
         )
     }
+
+    suspend fun generateDialogueScript(
+        themePrompt: String,
+        participants: List<com.example.data.model.DialogueParticipant>
+    ): List<com.example.data.model.DialogueLineItem> = withContext(Dispatchers.IO) {
+        val apiKey = try {
+            BuildConfig.GEMINI_API_KEY
+        } catch (e: Exception) {
+            ""
+        }
+
+        if (apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY") {
+            try {
+                return@withContext callGeminiDialogueApi(themePrompt, participants, apiKey)
+            } catch (e: Exception) {
+                Log.w(TAG, "Gemini dialogue API call failed: ${e.message}")
+            }
+        }
+
+        // Local smart fallback script generator
+        return@withContext localDialogueFallback(themePrompt, participants)
+    }
+
+    private fun callGeminiDialogueApi(
+        themePrompt: String,
+        participants: List<com.example.data.model.DialogueParticipant>,
+        apiKey: String
+    ): List<com.example.data.model.DialogueLineItem> {
+        val participantDescs = participants.joinToString(", ") { "${it.id}: ${it.name} (${it.voice.name})" }
+
+        val systemPrompt = """
+            Tu es un scénariste professionnel de fiction audio et podcast.
+            Rédige un dialogue naturel, vivant et expressif entre les participants suivants :
+            $participantDescs
+            
+            Sujet / Thème demandé : "$themePrompt"
+            
+            Réponds UNIQUEMENT avec un JSON strict contenant un tableau "lines" :
+            [
+               {"participantId": "part_1", "text": "Réplique dite par le personnage...", "pauseAfterMs": 350},
+               {"participantId": "part_2", "text": "Réplique suivante...", "pauseAfterMs": 300}
+            ]
+            Ne mets pas de balises markdown ```json.
+        """.trimIndent()
+
+        val jsonPayload = JSONObject().apply {
+            val contentsArray = JSONArray().apply {
+                val partObj = JSONObject().apply {
+                    put("text", systemPrompt)
+                }
+                val contentObj = JSONObject().apply {
+                    put("parts", JSONArray().put(partObj))
+                }
+                put(contentObj)
+            }
+            put("contents", contentsArray)
+
+            val genConfig = JSONObject().apply {
+                put("temperature", 0.7)
+                put("responseMimeType", "application/json")
+            }
+            put("generationConfig", genConfig)
+        }
+
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL_NAME:generateContent?key=$apiKey"
+        val request = Request.Builder()
+            .url(url)
+            .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        if (!response.isSuccessful) {
+            throw IllegalStateException("Gemini API error code ${response.code}")
+        }
+
+        val respBody = response.body?.string() ?: throw IllegalStateException("Empty body")
+        val rootJson = JSONObject(respBody)
+        val candidate = rootJson.getJSONArray("candidates").getJSONObject(0)
+        val textResponse = candidate.getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+
+        val cleanJson = textResponse.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val parsed = JSONObject(cleanJson)
+        val linesArray = parsed.getJSONArray("lines")
+        val result = mutableListOf<com.example.data.model.DialogueLineItem>()
+
+        for (i in 0 until linesArray.length()) {
+            val item = linesArray.getJSONObject(i)
+            val pid = item.optString("participantId", participants.firstOrNull()?.id ?: "p1")
+            val validPid = if (participants.any { it.id == pid }) pid else (participants[i % participants.size].id)
+            val text = item.optString("text", "")
+            val pause = item.optInt("pauseAfterMs", 350)
+            if (text.isNotBlank()) {
+                result.add(com.example.data.model.DialogueLineItem(id = "line_$i", participantId = validPid, text = text, pauseAfterMs = pause))
+            }
+        }
+        return result
+    }
+
+    private fun localDialogueFallback(
+        themePrompt: String,
+        participants: List<com.example.data.model.DialogueParticipant>
+    ): List<com.example.data.model.DialogueLineItem> {
+        if (participants.isEmpty()) return emptyList()
+        val p1 = participants[0]
+        val p2 = if (participants.size > 1) participants[1] else participants[0]
+        val p3 = if (participants.size > 2) participants[2] else p1
+
+        return listOf(
+            com.example.data.model.DialogueLineItem("l1", p1.id, "Bonjour ${p2.name} ! Que penses-tu de notre nouveau projet sur le thème : $themePrompt ?", 400),
+            com.example.data.model.DialogueLineItem("l2", p2.id, "C'est une excellente initiative ! Les voix sont d'une clarté impressionnante et le rendu est très naturel.", 350),
+            com.example.data.model.DialogueLineItem("l3", p3.id, "Exactement ! En combinant nos voix respectives, l'histoire prend instantanément vie.", 350),
+            com.example.data.model.DialogueLineItem("l4", p1.id, "Alors poursuivons, c'est parti pour une belle aventure audio !", 300)
+        )
+    }
 }

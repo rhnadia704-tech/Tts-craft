@@ -1,6 +1,6 @@
 {
   "name": "EdgeTTS Pro",
-  "description": "Convertisseur de texte en parole Edge TTS avec amélioration vocale par IA, voix naturelles et historique audio.",
+  "description": "Synthèse vocale Edge TTS & Azure, studio de dialogues multi-voix avec participants personnalisables et moteur sélectionnable dans les paramètres Android.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

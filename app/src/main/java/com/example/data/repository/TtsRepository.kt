@@ -153,6 +153,73 @@ class TtsRepository(
 
     suspend fun getRecordById(id: Long): AudioRecordEntity? = audioRecordDao.getRecordById(id)
 
+    suspend fun synthesizeDialogue(
+        dialogueTitle: String,
+        participants: List<com.example.data.model.DialogueParticipant>,
+        lines: List<com.example.data.model.DialogueLineItem>
+    ): Result<AudioRecordEntity> = withContext(Dispatchers.IO) {
+        val turns = lines.mapNotNull { line ->
+            val participant = participants.find { it.id == line.participantId }
+            if (participant != null && line.text.isNotBlank()) {
+                EdgeTtsService.DialogueTurnData(
+                    voiceId = participant.voice.id,
+                    text = line.text,
+                    speed = participant.speed,
+                    pitch = participant.pitch,
+                    pauseAfterMs = line.pauseAfterMs
+                )
+            } else null
+        }
+
+        if (turns.isEmpty()) {
+            return@withContext Result.failure(IllegalArgumentException("Aucune réplique valide dans le dialogue"))
+        }
+
+        val defaultLocale = participants.firstOrNull()?.voice?.locale ?: "fr-FR"
+        val synthResult = edgeTtsService.synthesizeDialogue(turns, defaultLocale)
+
+        val finalResult = if (synthResult.isSuccess) {
+            synthResult.getOrThrow()
+        } else {
+            return@withContext Result.failure(synthResult.exceptionOrNull() ?: Exception("Synthèse dialogue échouée"))
+        }
+
+        val fullScript = lines.joinToString("\n") { line ->
+            val speaker = participants.find { it.id == line.participantId }?.name ?: "Inconnu"
+            "$speaker : ${line.text}"
+        }
+
+        val participantsNames = participants.joinToString(", ") { "${it.name} (${it.voice.name})" }
+
+        val record = AudioRecordEntity(
+            title = if (dialogueTitle.isNotBlank()) dialogueTitle else "Dialogue (${participants.size} participants)",
+            text = fullScript,
+            voiceId = participants.firstOrNull()?.voice?.id ?: "multi",
+            voiceName = "👥 ${participants.size} Personnages",
+            language = defaultLocale,
+            speed = 1.0f,
+            pitch = 0.0f,
+            volume = 1.0f,
+            filePath = finalResult.file.absolutePath,
+            durationMs = finalResult.durationMs,
+            fileSizeBytes = finalResult.file.length(),
+            timestamp = System.currentTimeMillis(),
+            isAiEnhanced = false,
+            isDialogue = true,
+            participantsSummary = participantsNames
+        )
+
+        val id = audioRecordDao.insertRecord(record)
+        Result.success(record.copy(id = id))
+    }
+
+    suspend fun generateDialogueScript(
+        prompt: String,
+        participants: List<com.example.data.model.DialogueParticipant>
+    ): List<com.example.data.model.DialogueLineItem> {
+        return geminiAiService.generateDialogueScript(prompt, participants)
+    }
+
     suspend fun deleteRecord(record: AudioRecordEntity) = withContext(Dispatchers.IO) {
         try {
             val file = File(record.filePath)

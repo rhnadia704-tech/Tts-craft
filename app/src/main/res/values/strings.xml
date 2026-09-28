@@ -1,6 +1,8 @@
 <resources>
     <string name="app_name">EdgeTTS Pro</string>
+    <string name="tts_service_name">EdgeTTS Pro (Moteur Synthèse Vocale)</string>
     <string name="tab_synthesis">Synthèse</string>
+    <string name="tab_dialogue">Dialogue</string>
     <string name="tab_ai_enhancer">Amélioration IA</string>
     <string name="tab_history">Historique</string>
     <string name="tab_settings">Paramètres</string>
@@ -17,4 +19,5 @@
     <string name="voice_speed">Vitesse</string>
     <string name="voice_pitch">Tonalité (Pitch)</string>
     <string name="voice_volume">Volume</string>
+    <string name="system_tts_label">Moteur TTS Système Android</string>
 </resources>

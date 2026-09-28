@@ -23,5 +23,7 @@ data class AudioRecordEntity(
     val originalRecordId: Long? = null,
     val aiPrompt: String? = null,
     val aiModificationsSummary: String? = null,
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val isDialogue: Boolean = false,
+    val participantsSummary: String? = null
 )

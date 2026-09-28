@@ -7,6 +7,10 @@ import com.example.data.audio.AudioPlayerManager
 import com.example.data.audio.PlaybackState
 import com.example.data.local.AppDatabase
 import com.example.data.model.AudioRecordEntity
+import com.example.data.model.DialogueLineItem
+import com.example.data.model.DialogueParticipant
+import com.example.data.model.DialoguePreset
+import com.example.data.model.DialoguePresets
 import com.example.data.model.Voice
 import com.example.data.model.VoiceCatalog
 import com.example.data.remote.AndroidTtsFallback
@@ -21,9 +25,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 enum class HistoryFilter {
-    ALL, ORIGINALS, AI_ENHANCED, FAVORITES
+    ALL, DIALOGUES, ORIGINALS, AI_ENHANCED, FAVORITES
 }
 
 data class SynthesisUiState(
@@ -45,6 +50,17 @@ data class AiEnhancerUiState(
     val errorMessage: String? = null
 )
 
+data class DialogueUiState(
+    val title: String = "Débat Tech & IA",
+    val participants: List<DialogueParticipant> = DialoguePresets.getPresets().first().participants,
+    val lines: List<DialogueLineItem> = DialoguePresets.getPresets().first().lines,
+    val isSynthesizing: Boolean = false,
+    val isGeneratingAiScript: Boolean = false,
+    val aiScriptPrompt: String = "",
+    val lastGeneratedDialogueRecord: AudioRecordEntity? = null,
+    val errorMessage: String? = null
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: TtsRepository
@@ -54,6 +70,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _aiEnhancerUiState = MutableStateFlow(AiEnhancerUiState())
     val aiEnhancerUiState: StateFlow<AiEnhancerUiState> = _aiEnhancerUiState.asStateFlow()
+
+    private val _dialogueUiState = MutableStateFlow(DialogueUiState())
+    val dialogueUiState: StateFlow<DialogueUiState> = _dialogueUiState.asStateFlow()
 
     private val _historyFilter = MutableStateFlow(HistoryFilter.ALL)
     val historyFilter: StateFlow<HistoryFilter> = _historyFilter.asStateFlow()
@@ -91,7 +110,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             records.filter { record ->
                 val matchesFilter = when (filter) {
                     HistoryFilter.ALL -> true
-                    HistoryFilter.ORIGINALS -> !record.isAiEnhanced
+                    HistoryFilter.DIALOGUES -> record.isDialogue
+                    HistoryFilter.ORIGINALS -> !record.isAiEnhanced && !record.isDialogue
                     HistoryFilter.AI_ENHANCED -> record.isAiEnhanced
                     HistoryFilter.FAVORITES -> record.isFavorite
                 }
@@ -152,13 +172,169 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         lastSynthesizedRecord = record,
                         errorMessage = null
                     )
-                    // Auto play newly synthesized audio
                     repository.playerManager.playAudio(File(record.filePath), record.id)
                 },
                 onFailure = { error ->
                     _synthesisUiState.value = _synthesisUiState.value.copy(
                         isSynthesizing = false,
                         errorMessage = error.localizedMessage ?: "Erreur de génération audio"
+                    )
+                }
+            )
+        }
+    }
+
+    // --- Dialogue Studio actions ---
+    fun updateDialogueTitle(title: String) {
+        _dialogueUiState.value = _dialogueUiState.value.copy(title = title, errorMessage = null)
+    }
+
+    fun addParticipant(name: String, voice: Voice) {
+        val current = _dialogueUiState.value.participants.toMutableList()
+        val colors = listOf(0xFF00E5FF, 0xFFFFB300, 0xFFB388FF, 0xFF00E676, 0xFFFF5252, 0xFFFF80AB)
+        val assignedColor = colors[current.size % colors.size]
+
+        val newParticipant = DialogueParticipant(
+            id = "part_${UUID.randomUUID().toString().take(6)}",
+            name = name.ifBlank { "Personnage ${current.size + 1}" },
+            voice = voice,
+            colorHex = assignedColor
+        )
+        current.add(newParticipant)
+        _dialogueUiState.value = _dialogueUiState.value.copy(participants = current)
+    }
+
+    fun updateParticipant(updated: DialogueParticipant) {
+        val current = _dialogueUiState.value.participants.toMutableList()
+        val index = current.indexOfFirst { it.id == updated.id }
+        if (index >= 0) {
+            current[index] = updated
+            _dialogueUiState.value = _dialogueUiState.value.copy(participants = current)
+        }
+    }
+
+    fun removeParticipant(participantId: String) {
+        val current = _dialogueUiState.value.participants.toMutableList()
+        if (current.size <= 1) {
+            _dialogueUiState.value = _dialogueUiState.value.copy(errorMessage = "Il faut au moins 1 participant dans le dialogue")
+            return
+        }
+        current.removeAll { it.id == participantId }
+        val remainingLines = _dialogueUiState.value.lines.filter { it.participantId != participantId }
+        _dialogueUiState.value = _dialogueUiState.value.copy(participants = current, lines = remainingLines)
+    }
+
+    fun addDialogueLine(participantId: String, text: String = "", pauseAfterMs: Int = 350) {
+        val current = _dialogueUiState.value.lines.toMutableList()
+        current.add(
+            DialogueLineItem(
+                id = "line_${UUID.randomUUID().toString().take(6)}",
+                participantId = participantId,
+                text = text,
+                pauseAfterMs = pauseAfterMs
+            )
+        )
+        _dialogueUiState.value = _dialogueUiState.value.copy(lines = current)
+    }
+
+    fun updateDialogueLine(lineId: String, participantId: String, text: String, pauseAfterMs: Int) {
+        val current = _dialogueUiState.value.lines.toMutableList()
+        val index = current.indexOfFirst { it.id == lineId }
+        if (index >= 0) {
+            current[index] = DialogueLineItem(
+                id = lineId,
+                participantId = participantId,
+                text = text,
+                pauseAfterMs = pauseAfterMs
+            )
+            _dialogueUiState.value = _dialogueUiState.value.copy(lines = current)
+        }
+    }
+
+    fun deleteDialogueLine(lineId: String) {
+        val current = _dialogueUiState.value.lines.toMutableList()
+        current.removeAll { it.id == lineId }
+        _dialogueUiState.value = _dialogueUiState.value.copy(lines = current)
+    }
+
+    fun applyDialoguePreset(preset: DialoguePreset) {
+        _dialogueUiState.value = _dialogueUiState.value.copy(
+            title = preset.title,
+            participants = preset.participants,
+            lines = preset.lines,
+            lastGeneratedDialogueRecord = null,
+            errorMessage = null
+        )
+    }
+
+    fun updateAiScriptPrompt(prompt: String) {
+        _dialogueUiState.value = _dialogueUiState.value.copy(aiScriptPrompt = prompt)
+    }
+
+    fun generateDialogueScriptWithAi() {
+        val state = _dialogueUiState.value
+        val prompt = state.aiScriptPrompt.trim()
+        if (prompt.isBlank()) {
+            _dialogueUiState.value = state.copy(errorMessage = "Veuillez entrer une idée ou un thème de dialogue pour l'IA")
+            return
+        }
+
+        _dialogueUiState.value = state.copy(isGeneratingAiScript = true, errorMessage = null)
+
+        viewModelScope.launch {
+            try {
+                val newLines = repository.generateDialogueScript(prompt, state.participants)
+                if (newLines.isNotEmpty()) {
+                    _dialogueUiState.value = _dialogueUiState.value.copy(
+                        lines = newLines,
+                        isGeneratingAiScript = false,
+                        title = prompt.take(30).trim(),
+                        errorMessage = null
+                    )
+                } else {
+                    _dialogueUiState.value = _dialogueUiState.value.copy(
+                        isGeneratingAiScript = false,
+                        errorMessage = "Impossible de générer le script pour ce thème"
+                    )
+                }
+            } catch (e: Exception) {
+                _dialogueUiState.value = _dialogueUiState.value.copy(
+                    isGeneratingAiScript = false,
+                    errorMessage = e.localizedMessage ?: "Erreur génération IA"
+                )
+            }
+        }
+    }
+
+    fun synthesizeDialogue() {
+        val state = _dialogueUiState.value
+        if (state.lines.none { it.text.isNotBlank() }) {
+            _dialogueUiState.value = state.copy(errorMessage = "Ajoutez au moins une réplique avec du texte dans le dialogue")
+            return
+        }
+
+        _dialogueUiState.value = state.copy(isSynthesizing = true, errorMessage = null)
+
+        viewModelScope.launch {
+            val result = repository.synthesizeDialogue(
+                dialogueTitle = state.title,
+                participants = state.participants,
+                lines = state.lines
+            )
+
+            result.fold(
+                onSuccess = { record ->
+                    _dialogueUiState.value = _dialogueUiState.value.copy(
+                        isSynthesizing = false,
+                        lastGeneratedDialogueRecord = record,
+                        errorMessage = null
+                    )
+                    repository.playerManager.playAudio(File(record.filePath), record.id)
+                },
+                onFailure = { error ->
+                    _dialogueUiState.value = _dialogueUiState.value.copy(
+                        isSynthesizing = false,
+                        errorMessage = error.localizedMessage ?: "Erreur synthèse dialogue"
                     )
                 }
             )
@@ -211,7 +387,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         enhancedRecord = enhanced,
                         errorMessage = null
                     )
-                    // Play the enhanced audio
                     repository.playerManager.playAudio(File(enhanced.filePath), enhanced.id)
                 },
                 onFailure = { error ->
