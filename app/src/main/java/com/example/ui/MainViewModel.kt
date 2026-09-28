@@ -80,6 +80,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _testingVoiceId = MutableStateFlow<String?>(null)
+    val testingVoiceId: StateFlow<String?> = _testingVoiceId.asStateFlow()
+
+    private val _isTestingVoice = MutableStateFlow(false)
+    val isTestingVoice: StateFlow<Boolean> = _isTestingVoice.asStateFlow()
+
     val playbackState: StateFlow<PlaybackState>
 
     val filteredRecords: StateFlow<List<AudioRecordEntity>>
@@ -182,6 +188,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             )
         }
+    }
+
+    fun testVoice(voice: Voice, customSampleText: String? = null) {
+        val currentTesting = _testingVoiceId.value
+        if (currentTesting == voice.id && playbackState.value.isPlaying) {
+            stopVoiceTesting()
+            return
+        }
+
+        val textToSpeak = if (!customSampleText.isNullOrBlank()) customSampleText else voice.getSampleSentence()
+        _testingVoiceId.value = voice.id
+        _isTestingVoice.value = true
+
+        viewModelScope.launch {
+            val result = repository.synthesizePreview(textToSpeak, voice)
+            result.fold(
+                onSuccess = { file ->
+                    _isTestingVoice.value = false
+                    repository.playerManager.playAudio(file, -1L)
+                },
+                onFailure = {
+                    _testingVoiceId.value = null
+                    _isTestingVoice.value = false
+                }
+            )
+        }
+    }
+
+    fun stopVoiceTesting() {
+        repository.playerManager.stop()
+        _testingVoiceId.value = null
+        _isTestingVoice.value = false
     }
 
     // --- Dialogue Studio actions ---

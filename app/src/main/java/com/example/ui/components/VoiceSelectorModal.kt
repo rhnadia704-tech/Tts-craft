@@ -19,12 +19,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Female
 import androidx.compose.material.icons.filled.Male
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,7 +62,10 @@ fun VoiceSelectorModal(
     sheetState: SheetState,
     selectedVoice: Voice,
     onVoiceSelected: (Voice) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onTestVoice: ((Voice) -> Unit)? = null,
+    testingVoiceId: String? = null,
+    isPlayingTest: Boolean = false
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedLanguageFilter by remember { mutableStateOf("Tous") }
@@ -261,6 +268,34 @@ fun VoiceSelectorModal(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                                     maxLines = 1
                                 )
+                            }
+
+                            if (onTestVoice != null) {
+                                val isThisVoiceTesting = testingVoiceId == voice.id
+                                IconButton(
+                                    onClick = { onTestVoice(voice) },
+                                    modifier = Modifier.testTag("test_voice_btn_${voice.id}")
+                                ) {
+                                    if (isThisVoiceTesting && isPlayingTest) {
+                                        Icon(
+                                            imageVector = Icons.Default.Stop,
+                                            contentDescription = "Arrêter l'écoute",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    } else if (isThisVoiceTesting) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                            contentDescription = "Écouter un extrait",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
                             }
 
                             if (isSelected) {

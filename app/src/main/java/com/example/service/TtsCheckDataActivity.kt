@@ -21,6 +21,20 @@ class TtsCheckDataActivity : Activity() {
             if (!availableLangs.contains(langTag)) {
                 availableLangs.add(langTag)
             }
+            val iso3 = when (voice.locale.take(2).lowercase()) {
+                "fr" -> "fra"
+                "en" -> "eng"
+                "es" -> "spa"
+                "de" -> "deu"
+                "it" -> "ita"
+                "ar" -> "ara"
+                "ja" -> "jpn"
+                "pt" -> "por"
+                else -> voice.locale.take(3).lowercase()
+            }
+            if (!availableLangs.contains(iso3)) {
+                availableLangs.add(iso3)
+            }
         }
 
         returnIntent.putStringArrayListExtra(TextToSpeech.Engine.EXTRA_AVAILABLE_VOICES, availableLangs)

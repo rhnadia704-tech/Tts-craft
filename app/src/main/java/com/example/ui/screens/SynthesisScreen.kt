@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SettingsVoice
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -83,6 +85,7 @@ fun SynthesisScreen(
 ) {
     val uiState by viewModel.synthesisUiState.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val testingVoiceId by viewModel.testingVoiceId.collectAsStateWithLifecycle()
 
     var showVoiceModal by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -369,6 +372,36 @@ fun SynthesisScreen(
                     )
                 }
 
+                val isSelectedVoiceTesting = testingVoiceId == uiState.selectedVoice.id
+                val isPlayingCurrentTest = isSelectedVoiceTesting && playbackState.isPlaying
+
+                IconButton(
+                    onClick = {
+                        viewModel.testVoice(uiState.selectedVoice)
+                    },
+                    modifier = Modifier.testTag("quick_test_selected_voice_btn")
+                ) {
+                    if (isPlayingCurrentTest) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Arrêter",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    } else if (isSelectedVoiceTesting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Tester cette voix",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowDown,
                     contentDescription = "Changer la voix",
@@ -622,10 +655,16 @@ fun SynthesisScreen(
                 viewModel.selectVoice(voice)
             },
             onDismiss = {
+                viewModel.stopVoiceTesting()
                 coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
                     showVoiceModal = false
                 }
-            }
+            },
+            onTestVoice = { voice ->
+                viewModel.testVoice(voice)
+            },
+            testingVoiceId = testingVoiceId,
+            isPlayingTest = playbackState.isPlaying && playbackState.audioId == -1L
         )
     }
 }

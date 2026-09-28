@@ -9,7 +9,22 @@ data class Voice(
     val flagEmoji: String,
     val description: String,
     val isPopular: Boolean = false
-)
+) {
+    fun getSampleSentence(): String {
+        val lang = locale.take(2).lowercase()
+        return when (lang) {
+            "fr" -> "Bonjour, je suis $name. Ceci est un aperçu de ma voix neuronale haute fidélité."
+            "en" -> "Hello, I am $name. This is a demonstration of my natural neural voice."
+            "es" -> "Hola, soy $name. Esta es una muestra de mi voz neuronal de alta fidelidad."
+            "de" -> "Hallo, ich bin $name. Dies ist eine Hörprobe meiner natürlichen Stimme."
+            "it" -> "Ciao, sono $name. Questo è un saggio della mia voce neurale naturale."
+            "ar" -> "مرحباً، أنا $name. هذا نموذج لصوتي الطبيعي عالي الجودة."
+            "ja" -> "こんにちは、$name です。私の高品質ニューラル音声のテストです。"
+            "pt" -> "Olá, eu sou $name. Esta é uma demonstração da minha voz neural natural."
+            else -> "Bonjour, je suis $name, synthèse vocale haute définition."
+        }
+    }
+}
 
 enum class VoiceGender {
     FEMALE, MALE, NEUTRAL

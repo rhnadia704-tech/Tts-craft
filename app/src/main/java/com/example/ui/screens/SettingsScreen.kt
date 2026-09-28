@@ -52,9 +52,28 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Hearing
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.model.Voice
+import com.example.data.model.VoiceCatalog
+import com.example.ui.components.VoiceSelectorModal
+import kotlinx.coroutines.launch
 import com.example.ui.MainViewModel
 import java.io.File
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: MainViewModel,
@@ -62,6 +81,22 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+
+    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val testingVoiceId by viewModel.testingVoiceId.collectAsStateWithLifecycle()
+
+    val prefs = remember { context.getSharedPreferences("tts_preferences", android.content.Context.MODE_PRIVATE) }
+    var defaultSystemVoice by remember {
+        val savedId = prefs.getString("system_default_voice_id", null)
+        mutableStateOf(if (savedId != null) VoiceCatalog.findById(savedId) else VoiceCatalog.getDefaultVoice())
+    }
+
+    var selectedTestVoice by remember { mutableStateOf(defaultSystemVoice) }
+    var testSampleText by remember { mutableStateOf("Bonjour ! Ceci est un test de synthèse vocale avec Edge TTS Pro.") }
+    var showVoicePickerModal by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var systemVoiceSetFeedback by remember { mutableStateOf<String?>(null) }
 
     var cacheClearedMessage by remember { mutableStateOf<String?>(null) }
 
@@ -230,6 +265,220 @@ fun SettingsScreen(
                     Icon(imageVector = Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Ouvrir les Paramètres TTS d'Android", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // VOICE TESTING & CONFIGURATION CARD
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("voice_testing_card"),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Hearing,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Tester les voix Edge TTS",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Écoutez chaque voix et définissez la voix système",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Voice selection trigger
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showVoicePickerModal = true }
+                        .testTag("test_voice_picker_trigger")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = selectedTestVoice.flagEmoji,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = selectedTestVoice.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (selectedTestVoice.id == defaultSystemVoice.id) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "Voix Système",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "${selectedTestVoice.languageDisplayName} • ${selectedTestVoice.id}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Changer la voix",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Editable sample text
+                OutlinedTextField(
+                    value = testSampleText,
+                    onValueChange = { testSampleText = it },
+                    label = { Text("Texte du test de voix") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("test_sample_text_field"),
+                    shape = RoundedCornerShape(12.dp),
+                    maxLines = 3
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Suggestion chips
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val presets = listOf(
+                        "🎙️ Présentation" to "Bonjour ! Je suis ${selectedTestVoice.name}, voix neuronale haute fidélité Edge TTS.",
+                        "🗺️ GPS" to "Dans trois cents mètres, prenez la sortie vers le boulevard circulaire.",
+                        "📚 Récit" to "Il était une fois, par une douce nuit d'été, un voyage extraordinaire.",
+                        "💬 Dialogue" to "Bonjour, comment puis-je vous aider dans vos tâches aujourd'hui ?"
+                    )
+                    items(presets) { (label, phrase) ->
+                        SuggestionChip(
+                            onClick = { testSampleText = phrase },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val isCurrentTesting = testingVoiceId == selectedTestVoice.id
+                val isPlayingCurrent = isCurrentTesting && playbackState.isPlaying
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            if (isPlayingCurrent) {
+                                viewModel.stopVoiceTesting()
+                            } else {
+                                viewModel.testVoice(selectedTestVoice, testSampleText)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("listen_voice_test_btn"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isPlayingCurrent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        if (isPlayingCurrent) {
+                            Icon(imageVector = Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Arrêter")
+                        } else if (isCurrentTesting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Chargement...")
+                        } else {
+                            Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Écouter la voix")
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            prefs.edit().putString("system_default_voice_id", selectedTestVoice.id).apply()
+                            defaultSystemVoice = selectedTestVoice
+                            systemVoiceSetFeedback = "Voix ${selectedTestVoice.name} définie comme voix système par défaut !"
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("set_default_system_voice_btn"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Définir par défaut", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                if (systemVoiceSetFeedback != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = systemVoiceSetFeedback!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -570,5 +819,27 @@ fun SettingsScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    if (showVoicePickerModal) {
+        VoiceSelectorModal(
+            sheetState = sheetState,
+            selectedVoice = selectedTestVoice,
+            onVoiceSelected = { voice ->
+                selectedTestVoice = voice
+                testSampleText = voice.getSampleSentence()
+            },
+            onDismiss = {
+                viewModel.stopVoiceTesting()
+                coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
+                    showVoicePickerModal = false
+                }
+            },
+            onTestVoice = { voice ->
+                viewModel.testVoice(voice)
+            },
+            testingVoiceId = testingVoiceId,
+            isPlayingTest = playbackState.isPlaying && playbackState.audioId == -1L
+        )
     }
 }

@@ -40,6 +40,7 @@
         <service
             android:name=".service.EdgeTextToSpeechService"
             android:label="@string/tts_service_name"
+            android:permission="android.permission.BIND_TEXT_TO_SPEECH_SERVICE"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.TTS_SERVICE" />

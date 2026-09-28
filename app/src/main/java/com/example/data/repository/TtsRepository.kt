@@ -83,6 +83,28 @@ class TtsRepository(
         Result.success(record.copy(id = id))
     }
 
+    suspend fun synthesizePreview(
+        text: String,
+        voice: Voice
+    ): Result<File> = withContext(Dispatchers.IO) {
+        val edgeResult = edgeTtsService.synthesize(
+            text = text,
+            voice = voice,
+            rateFactor = 1.0f,
+            pitchHz = 0.0f
+        )
+        if (edgeResult.isSuccess) {
+            Result.success(edgeResult.getOrThrow().file)
+        } else {
+            val fbResult = androidTtsFallback.synthesizeToFile(text, voice)
+            if (fbResult.isSuccess) {
+                Result.success(fbResult.getOrThrow().file)
+            } else {
+                Result.failure(edgeResult.exceptionOrNull() ?: Exception("Synthèse de prévisualisation échouée"))
+            }
+        }
+    }
+
     suspend fun enhanceExistingAudioWithAi(
         sourceAudio: AudioRecordEntity,
         userPrompt: String

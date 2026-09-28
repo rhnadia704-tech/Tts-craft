@@ -34,11 +34,8 @@ class EdgeTtsService(private val context: Context) {
 
     companion object {
         private const val TAG = "EdgeTtsService"
-        private const val WSS_URL =
-            "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EA634079835704FD0536639"
-        private const val CHROMIUM_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
-        private const val CHROMIUM_ORIGIN = "chrome-extension://jdiccldimpdaibhpfdgahkhmagonmmnj"
+        private const val BASE_WSS_URL =
+            "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1"
     }
 
     data class SynthesisResult(
@@ -87,7 +84,14 @@ class EdgeTtsService(private val context: Context) {
             </speak>
         """.trimIndent()
 
-        synthesizeSsml(ssml)
+        // Attempt synthesis with 1 automatic retry on clock skew / 403
+        var result = synthesizeSsml(ssml)
+        if (result.isFailure) {
+            Log.w(TAG, "First synthesis attempt failed. Syncing server clock skew and retrying...")
+            syncClockSkew()
+            result = synthesizeSsml(ssml)
+        }
+        result
     }
 
     suspend fun synthesizeDialogue(
@@ -122,7 +126,33 @@ class EdgeTtsService(private val context: Context) {
             </speak>
         """.trimIndent()
 
-        synthesizeSsml(ssml)
+        var result = synthesizeSsml(ssml)
+        if (result.isFailure) {
+            Log.w(TAG, "First dialogue synthesis attempt failed. Syncing clock skew and retrying...")
+            syncClockSkew()
+            result = synthesizeSsml(ssml)
+        }
+        result
+    }
+
+    private suspend fun syncClockSkew() = withContext(Dispatchers.IO) {
+        try {
+            val listUrl = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${DRM.TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${DRM.generateSecMsGec()}&Sec-MS-GEC-Version=${DRM.SEC_MS_GEC_VERSION}"
+            val checkRequest = Request.Builder()
+                .url(listUrl)
+                .addHeader("User-Agent", DRM.CHROMIUM_USER_AGENT)
+                .addHeader("Origin", DRM.CHROMIUM_ORIGIN)
+                .get()
+                .build()
+            client.newCall(checkRequest).execute().use { response ->
+                val serverDate = response.header("Date")
+                if (!serverDate.isNullOrBlank()) {
+                    DRM.adjustClockSkew(serverDate)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "syncClockSkew notice: ${e.message}")
+        }
     }
 
     private suspend fun synthesizeSsml(ssml: String): Result<SynthesisResult> = withContext(Dispatchers.IO) {
@@ -134,14 +164,19 @@ class EdgeTtsService(private val context: Context) {
 
         val requestId = UUID.randomUUID().toString().replace("-", "")
         val connectionId = UUID.randomUUID().toString().replace("-", "")
+        val secMsGec = DRM.generateSecMsGec()
+        val muid = DRM.generateMuid()
 
-        val requestUrl = "$WSS_URL&ConnectionId=$connectionId"
+        val requestUrl = "$BASE_WSS_URL?TrustedClientToken=${DRM.TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=$secMsGec&Sec-MS-GEC-Version=${DRM.SEC_MS_GEC_VERSION}&ConnectionId=$connectionId"
+        
         val request = Request.Builder()
             .url(requestUrl)
-            .addHeader("User-Agent", CHROMIUM_AGENT)
-            .addHeader("Origin", CHROMIUM_ORIGIN)
+            .addHeader("User-Agent", DRM.CHROMIUM_USER_AGENT)
+            .addHeader("Origin", DRM.CHROMIUM_ORIGIN)
+            .addHeader("Cookie", "muid=$muid;")
             .addHeader("Pragma", "no-cache")
             .addHeader("Cache-Control", "no-cache")
+            .addHeader("Accept-Encoding", "gzip, deflate, br")
             .addHeader("Accept-Language", "en-US,en;q=0.9")
             .build()
 
@@ -149,12 +184,17 @@ class EdgeTtsService(private val context: Context) {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 super.onOpen(webSocket, response)
                 try {
+                    val dateHeader = response.header("Date")
+                    if (!dateHeader.isNullOrBlank()) {
+                        DRM.adjustClockSkew(dateHeader)
+                    }
+
                     val dateStr = getCurrentUtcDate()
                     // 1. Send speech config
                     val configMsg = "X-Timestamp:$dateStr\r\n" +
                             "Content-Type:application/json; charset=utf-8\r\n" +
                             "Path:speech.config\r\n\r\n" +
-                            "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"true\"},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}"
+                            "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}"
                     webSocket.send(configMsg)
 
                     // 2. Send SSML message
@@ -199,7 +239,11 @@ class EdgeTtsService(private val context: Context) {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 super.onFailure(webSocket, t, response)
-                Log.w(TAG, "WebSocket failure: ${t.message}")
+                val serverDate = response?.header("Date")
+                if (!serverDate.isNullOrBlank()) {
+                    DRM.adjustClockSkew(serverDate)
+                }
+                Log.w(TAG, "WebSocket failure: ${t.message} (code: ${response?.code})")
                 completionDeferred.complete(false)
             }
 
@@ -212,7 +256,7 @@ class EdgeTtsService(private val context: Context) {
         }
 
         val ws = client.newWebSocket(request, listener)
-        val success = withTimeoutOrNull(30_000) {
+        val success = withTimeoutOrNull(25_000) {
             completionDeferred.await()
         } ?: false
 
@@ -237,7 +281,7 @@ class EdgeTtsService(private val context: Context) {
     }
 
     private fun getCurrentUtcDate(): String {
-        val sdf = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT'Z (zzzz)", Locale.US)
+        val sdf = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000' '(Coordinated Universal Time)'", Locale.ENGLISH)
         sdf.timeZone = TimeZone.getTimeZone("UTC")
         return sdf.format(Date())
     }

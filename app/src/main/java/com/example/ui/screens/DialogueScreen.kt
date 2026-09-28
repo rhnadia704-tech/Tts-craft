@@ -89,6 +89,7 @@ fun DialogueScreen(
 ) {
     val uiState by viewModel.dialogueUiState.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val testingVoiceId by viewModel.testingVoiceId.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
@@ -677,10 +678,16 @@ fun DialogueScreen(
                 viewModel.updateParticipant(participant.copy(voice = voice))
             },
             onDismiss = {
+                viewModel.stopVoiceTesting()
                 coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
                     showVoiceModalForParticipant = null
                 }
-            }
+            },
+            onTestVoice = { voice ->
+                viewModel.testVoice(voice)
+            },
+            testingVoiceId = testingVoiceId,
+            isPlayingTest = playbackState.isPlaying && playbackState.audioId == -1L
         )
     }
 

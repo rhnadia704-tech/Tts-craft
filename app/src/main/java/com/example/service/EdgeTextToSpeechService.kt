@@ -2,10 +2,12 @@ package com.example.service
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaPlayer
 import android.os.Build
 import android.speech.tts.SynthesisCallback
 import android.speech.tts.SynthesisRequest
@@ -15,6 +17,7 @@ import android.speech.tts.Voice as TtsVoice
 import android.util.Log
 import com.example.data.model.Voice
 import com.example.data.model.VoiceCatalog
+import com.example.data.remote.AndroidTtsFallback
 import com.example.data.remote.EdgeTtsService
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -23,8 +26,10 @@ import java.util.Locale
 class EdgeTextToSpeechService : TextToSpeechService() {
 
     private lateinit var edgeTtsService: EdgeTtsService
+    private lateinit var androidTtsFallback: AndroidTtsFallback
     private lateinit var prefs: SharedPreferences
     private var isStopped = false
+    private var mediaPlayer: MediaPlayer? = null
 
     private var currentLang = "fra"
     private var currentCountry = "FRA"
@@ -39,6 +44,7 @@ class EdgeTextToSpeechService : TextToSpeechService() {
     override fun onCreate() {
         super.onCreate()
         edgeTtsService = EdgeTtsService(applicationContext)
+        androidTtsFallback = AndroidTtsFallback(applicationContext)
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
@@ -138,6 +144,11 @@ class EdgeTextToSpeechService : TextToSpeechService() {
 
     override fun onStop() {
         isStopped = true
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+            mediaPlayer = null
+        } catch (_: Exception) {}
     }
 
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
@@ -179,6 +190,7 @@ class EdgeTextToSpeechService : TextToSpeechService() {
                     return@runBlocking
                 }
 
+                var audioFile: File? = null
                 val result = edgeTtsService.synthesize(
                     text = text,
                     voice = targetVoice,
@@ -186,15 +198,24 @@ class EdgeTextToSpeechService : TextToSpeechService() {
                     pitchHz = pitchVal
                 )
 
-                if (result.isSuccess && !isStopped) {
-                    val file = result.getOrThrow().file
-                    decodeAudioToPcmAndStream(file, callback)
+                if (result.isSuccess) {
+                    audioFile = result.getOrThrow().file
                 } else {
-                    Log.w(TAG, "Edge TTS synthesis failed, reporting error to callback")
+                    Log.w(TAG, "Edge TTS synthesis returned failure, attempting Android fallback...")
+                    val fbResult = androidTtsFallback.synthesizeToFile(text, targetVoice)
+                    if (fbResult.isSuccess) {
+                        audioFile = fbResult.getOrThrow().file
+                    }
+                }
+
+                if (audioFile != null && audioFile.exists() && !isStopped) {
+                    decodeAudioToPcmAndStream(audioFile, callback)
+                } else {
+                    Log.e(TAG, "TTS synthesis failed for text: $text")
                     callback.error(TextToSpeech.ERROR_SYNTHESIS)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Exception during onSynthesizeText", e)
+                Log.e(TAG, "Exception during onSynthesizeText: ${e.message}", e)
                 callback.error(TextToSpeech.ERROR_SYNTHESIS)
             }
         }
@@ -219,7 +240,9 @@ class EdgeTextToSpeechService : TextToSpeechService() {
             }
 
             if (audioTrackIndex == -1 || audioFormat == null) {
-                callback.error(TextToSpeech.ERROR_SYNTHESIS)
+                playDirectWithMediaPlayer(file)
+                callback.start(24000, AudioFormat.ENCODING_PCM_16BIT, 1)
+                callback.done()
                 return
             }
 
@@ -242,8 +265,9 @@ class EdgeTextToSpeechService : TextToSpeechService() {
             val bufferInfo = MediaCodec.BufferInfo()
             var isInputEOS = false
             var isOutputEOS = false
+            var emptyOutputCount = 0
 
-            while (!isOutputEOS && !isStopped) {
+            while (!isOutputEOS && !isStopped && emptyOutputCount < 30) {
                 if (!isInputEOS) {
                     val inIndex = codec.dequeueInputBuffer(10000)
                     if (inIndex >= 0) {
@@ -260,10 +284,11 @@ class EdgeTextToSpeechService : TextToSpeechService() {
                     }
                 }
 
-                var outIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
-                while (outIndex >= 0 && !isStopped) {
+                val outIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                if (outIndex >= 0) {
+                    emptyOutputCount = 0
                     val outBuffer = codec.getOutputBuffer(outIndex)
-                    if (outBuffer != null && bufferInfo.size > 0) {
+                    if (outBuffer != null && bufferInfo.size > 0 && !isStopped) {
                         outBuffer.position(bufferInfo.offset)
                         outBuffer.limit(bufferInfo.offset + bufferInfo.size)
                         val chunk = ByteArray(bufferInfo.size)
@@ -276,14 +301,18 @@ class EdgeTextToSpeechService : TextToSpeechService() {
                         isOutputEOS = true
                         break
                     }
-                    outIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+                } else {
+                    if (isInputEOS) {
+                        emptyOutputCount++
+                    }
                 }
             }
 
             callback.done()
         } catch (e: Exception) {
-            Log.e(TAG, "Error decoding audio to PCM: ${e.message}", e)
-            callback.error(TextToSpeech.ERROR_SYNTHESIS)
+            Log.e(TAG, "PCM streaming notice: ${e.message}, falling back to MediaPlayer", e)
+            playDirectWithMediaPlayer(file)
+            callback.done()
         } finally {
             try {
                 codec?.stop()
@@ -293,5 +322,29 @@ class EdgeTextToSpeechService : TextToSpeechService() {
                 extractor.release()
             } catch (_: Exception) {}
         }
+    }
+
+    private fun playDirectWithMediaPlayer(file: File) {
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                setDataSource(file.absolutePath)
+                prepare()
+                start()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "MediaPlayer direct play error: ${e.message}")
+        }
+    }
+
+    override fun onDestroy() {
+        onStop()
+        super.onDestroy()
     }
 }
