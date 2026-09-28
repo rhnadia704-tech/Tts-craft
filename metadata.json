@@ -1,0 +1,6 @@
+{
+  "name": "EdgeTTS Pro",
+  "description": "Convertisseur de texte en parole Edge TTS avec amélioration vocale par IA, voix naturelles et historique audio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

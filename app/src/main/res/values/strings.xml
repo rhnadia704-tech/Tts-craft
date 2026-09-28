@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">EdgeTTS Pro</string>
+    <string name="tab_synthesis">Synthèse</string>
+    <string name="tab_ai_enhancer">Amélioration IA</string>
+    <string name="tab_history">Historique</string>
+    <string name="tab_settings">Paramètres</string>
+    <string name="text_hint">Entrez le texte à synthétiser en parole...</string>
+    <string name="generate_audio">Générer l\'audio</string>
+    <string name="generating">Génération en cours…</string>
+    <string name="play">Écouter</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Arrêter</string>
+    <string name="share">Partager</string>
+    <string name="download">Sauvegarder</string>
+    <string name="enhance_with_ai">Améliorer avec l\'IA</string>
+    <string name="ai_prompt_hint">Décrivez les améliorations à apporter (ex: ton plus chaleureux et posé, pauses naturelles, intonation expressive...)</string>
+    <string name="voice_speed">Vitesse</string>
+    <string name="voice_pitch">Tonalité (Pitch)</string>
+    <string name="voice_volume">Volume</string>
+</resources>
